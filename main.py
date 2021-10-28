@@ -10,7 +10,7 @@ from transformers import (AdamW, AutoConfig, AutoTokenizer, get_linear_schedule_
 from processors.metrics import get_predictions
 from transformers import XLNetModel, XLNetTokenizer, XLNetConfig
 from torch.nn import BCEWithLogitsLoss,CrossEntropyLoss
-from coqaXLNet import CoqaPipeline, Tokenizer, XLNetExampleProcessor, XLNetPredictProcessor, OutputResult
+from processors.coqa import CoqaPipeline, Tokenizer, XLNetExampleProcessor, XLNetPredictProcessor, OutputResult
 
 train_file="coqa-train-v1.0.json"
 predict_file="coqa-dev-v1.0.json"
