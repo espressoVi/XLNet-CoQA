@@ -14,7 +14,7 @@ from processors.coqa import CoqaPipeline, Tokenizer, XLNetExampleProcessor, XLNe
 
 train_file="coqa-train-v1.0.json"
 predict_file="coqa-dev-v1.0.json"
-output_directory="XLNet_base"
+output_directory="XLNet_comb"
 pretrained_model="xlnet-base-cased"
 max_seq_length = 512
 epochs = 1.0
@@ -348,6 +348,9 @@ def load_dataset(tokenizer, evaluate=False, dataset_type = None):
             if evaluate:
                 examples = processor.get_dev_examples(dataset_type = dataset_type)
             else:
+                examples = processor.get_train_examples(dataset_type = "TS")
+                examples.extend(processor.get_train_examples(dataset_type = None))
+                examples.extend(processor.get_train_examples(dataset_type = 'RG'))
                 examples = processor.get_train_examples()
 
         feat_extract = XLNetExampleProcessor(tokenizer)
@@ -389,5 +392,5 @@ def main(isTraining):
         Write_predictions(model, tokenizer, device, dataset_type = "R")
 
 if __name__ == "__main__":
-    #main(isTraining = True)
-    main(isTraining = False)
+    main(isTraining = True)
+    #main(isTraining = False)

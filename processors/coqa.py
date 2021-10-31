@@ -441,12 +441,7 @@ class CoqaPipeline(object):
 
             for i, (question, answer) in enumerate(qas):
                 qas_id = "{0}_{1}".format(data_id, i+1)
-                
-                answer_type, answer_subtype = self._get_answer_type(question, answer)
-                answer_text, span_start, span_end, is_skipped = self._get_answer_span(answer, answer_type, paragraph_text)
-                question_text = self._get_question_text(question_history, question)
-                question_history = self._get_question_history(question_history, question, answer, answer_type, is_skipped, self.num_turn)
-                
+
                 if dataset_type is not None:
                     if dataset_type == "TS":
                         edge,inc = answer['span_end'],True
@@ -461,13 +456,19 @@ class CoqaPipeline(object):
                             if i < edge <= j:
                                 sent = j if inc else i
                                 break
-                        para = str(parsed[:sent])
-                        if len(para) == 0:
+                        paragraph_text = str(parsed[:sent])
+                        if len(paragraph_text) == 0:
                             continue
                 if dataset_type == "RG":
                     para = para + ' ' + answer['input_text']
 
+
+                answer_type, answer_subtype = self._get_answer_type(question, answer)
+                answer_text, span_start, span_end, is_skipped = self._get_answer_span(answer, answer_type, paragraph_text)
+                question_text = self._get_question_text(question_history, question)
+                question_history = self._get_question_history(question_history, question, answer, answer_type, is_skipped, self.num_turn)
                 
+                                
                 if answer_type not in ["unknown", "yes", "no"] and not is_skipped and answer_text:
                     start_position = span_start
                     orig_answer_text = self._process_found_answer(answer["input_text"], answer_text)
@@ -478,11 +479,11 @@ class CoqaPipeline(object):
                 example = InputExample(
                     qas_id=qas_id,
                     question_text=question_text,
-                    paragraph_text=paragraph_text if dataset_type is None else para,
-                    orig_answer_text=orig_answer_text if dataset_type is None else "",
-                    start_position=start_position if dataset_type is None else 0,
-                    answer_type=answer_type,
-                    answer_subtype=answer_subtype,
+                    paragraph_text=paragraph_text,
+                    orig_answer_text= orig_answer_text if dataset_type in [None,'TS'] else "unknown",
+                    start_position=start_position if dataset_type in [None, 'TS'] else 0,
+                    answer_type=answer_type if dataset_type in [None,'TS'] else "unknown",
+                    answer_subtype=answer_subtype if dataset_type in [None,'TS'] else None,
                     is_skipped=is_skipped)
 
                 examples.append(example)
