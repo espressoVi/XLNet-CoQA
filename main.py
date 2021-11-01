@@ -68,11 +68,20 @@ class XLNetBaseModel(XLNetModel):
             start_positions=None,end_positions=None,
             is_unk = None,is_yes = None,
             is_no = None, number = None, 
-            option = None,):
+            option = None, attn = False):
         
         predicts = {}
         #****************************************XLNET-BASE***************************
-        output_result,_ = self.xlnet(input_ids,
+        if attn:
+            output_result,_,attentions = self.xlnet(input_ids,
+                            token_type_ids=segment_ids,
+                            input_mask=input_mask,
+                            output_hidden_states = False,
+                            output_attentions = True,
+                            return_dict = False)
+            attentions = list(attentions)
+        else:
+            output_result,_ = self.xlnet(input_ids,
                             token_type_ids=segment_ids,
                             input_mask=input_mask,
                             return_dict = False)
@@ -216,7 +225,10 @@ class XLNetBaseModel(XLNetModel):
             loss += torch.mean(opt_loss)
 
             return loss
-        return predicts
+        if attn:
+            return predicts,attentions
+        else:
+            return predicts
 
 def convert_to_list(tensor):
     return tensor.detach().cpu().tolist()
@@ -292,8 +304,6 @@ def Write_predictions(model, tokenizer, device, dataset_type = None):
 
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
-        
-    #   wrtiting predictions once training is complete
     evalutation_sampler = SequentialSampler(dataset)
     evaluation_dataloader = DataLoader(dataset, sampler=evalutation_sampler, batch_size=evaluation_batch_size)
     predict_results = []
@@ -324,6 +334,35 @@ def Write_predictions(model, tokenizer, device, dataset_type = None):
     predict_processor = XLNetPredictProcessor(output_dir = output_directory, tokenizer=tokenizer, predict_tag = "normal")
     predict_processor.process(examples, features, predict_results)
 
+def Write_attentions(model, tokenizer, device, dataset_type = None):
+    dataset, examples, features = load_dataset(tokenizer, evaluate=True,dataset_type = dataset_type)
+
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+        
+    #   wrtiting predictions once training is complete
+    evalutation_sampler = SequentialSampler(dataset)
+    evaluation_dataloader = DataLoader(dataset, sampler=evalutation_sampler, batch_size=evaluation_batch_size)
+    attn_results = []
+    for batch in tqdm(evaluation_dataloader, desc="Evaluating"):
+        model.eval()
+        batch = tuple(t.to(device) for t in batch)
+        with torch.no_grad():
+            inputs = { "input_ids": batch[0],
+                       "input_mask": batch[1],
+                       "segment_ids": batch[2],
+                       "cls_index": batch[3],
+                       "p_mask": batch[4],
+                       "attn": True,}
+            index = batch[5]
+            result = model(**inputs)
+        for i, example_index in enumerate(example_indices):
+            eval_feature = features[index[i].item()]
+            unique_id = int(eval_feature.unique_id)
+            attentions = result[-1]
+            attentions = [output[i].detach().cpu().numpy() for output in attentions]
+            print(len(attentions),attentions[0].shape,attentions[-1].shape)
+
 
 def load_dataset(tokenizer, evaluate=False, dataset_type = None):
     #   converting raw coqa dataset into features to be processed by ROBERTA   
@@ -333,7 +372,7 @@ def load_dataset(tokenizer, evaluate=False, dataset_type = None):
     else:
         cache_file = os.path.join(input_dir,"xlnet-base_train")
 
-    if os.path.exists(cache_file) and False:
+    if os.path.exists(cache_file)# and False:
         print("Loading cache",cache_file)
         features_and_dataset = torch.load(cache_file)
         features, dataset, examples = (
@@ -362,8 +401,9 @@ def load_dataset(tokenizer, evaluate=False, dataset_type = None):
     return dataset
 
 
-def main(isTraining):
+def main(isTraining, attn = False):
     assert torch.cuda.is_available()
+    assert not (isTraining and attn)
     device = torch.device('cuda')
     config = XLNetConfig.from_pretrained(pretrained_model)
 
@@ -383,13 +423,19 @@ def main(isTraining):
         torch.save(model.state_dict(), os.path.join(output_directory,'tweights.pt'))
 
     else:
-        model = XLNetBaseModel(config)
-        model.load_state_dict(torch.load(os.path.join(output_directory,'tweights.pt')))
-        model.to(device)
-        model.eval()
-        tokenizer = Tokenizer(output_directory)
-        Write_predictions(model, tokenizer, device, dataset_type = 'R')
+        if attn:
+            model = XLNetBaseModel(config)
+            model.load_state_dict(torch.load(os.path.join(output_directory,'tweights.pt')))
+            model.to(device)
+            tokenizer = Tokenizer(output_directory)
+            Write_attentions(model, tokenizer, device, dataset_type = 'R')
+        else:
+            model = XLNetBaseModel(config)
+            model.load_state_dict(torch.load(os.path.join(output_directory,'tweights.pt')))
+            model.to(device)
+            tokenizer = Tokenizer(output_directory)
+            Write_predictions(model, tokenizer, device, dataset_type = 'R')
 
 if __name__ == "__main__":
     #main(isTraining = True)
-    main(isTraining = False)
+    main(isTraining = False,attn = True)
