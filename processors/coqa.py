@@ -460,7 +460,7 @@ class CoqaPipeline(object):
                         if len(paragraph_text) == 0:
                             continue
                 if dataset_type == "RG":
-                    para = para + ' ' + answer['input_text']
+                    paragraph_text = paragraph_text + ' ' + answer['input_text']
 
 
                 answer_type, answer_subtype = self._get_answer_type(question, answer)

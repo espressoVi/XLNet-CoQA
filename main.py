@@ -349,9 +349,8 @@ def load_dataset(tokenizer, evaluate=False, dataset_type = None):
                 examples = processor.get_dev_examples(dataset_type = dataset_type)
             else:
                 examples = processor.get_train_examples(dataset_type = "TS")
-                examples.extend(processor.get_train_examples(dataset_type = None))
+                examples.extend(processor.get_train_examples())
                 examples.extend(processor.get_train_examples(dataset_type = 'RG'))
-                examples = processor.get_train_examples()
 
         feat_extract = XLNetExampleProcessor(tokenizer)
         features, dataset = feat_extract.convert_examples_to_features(examples, not evaluate)
@@ -389,8 +388,8 @@ def main(isTraining):
         model.to(device)
         model.eval()
         tokenizer = Tokenizer(output_directory)
-        Write_predictions(model, tokenizer, device, dataset_type = "R")
+        Write_predictions(model, tokenizer, device, dataset_type = 'R')
 
 if __name__ == "__main__":
-    main(isTraining = True)
-    #main(isTraining = False)
+    #main(isTraining = True)
+    main(isTraining = False)
