@@ -18,7 +18,7 @@ output_directory="XLNet_comb"
 pretrained_model="xlnet-base-cased"
 max_seq_length = 512
 epochs = 1.0
-evaluation_batch_size = 16
+evaluation_batch_size = 14
 train_batch_size = 4
 lr = 3e-5
 MIN_FLOAT = -1e30
@@ -356,12 +356,12 @@ def Write_attentions(model, tokenizer, device, dataset_type = None):
                        "attn": True,}
             index = batch[5]
             result = model(**inputs)
-        for i, example_index in enumerate(example_indices):
+        for i, example_index in enumerate(index):
             eval_feature = features[index[i].item()]
             unique_id = int(eval_feature.unique_id)
             attentions = result[-1]
             attentions = [output[i].detach().cpu().numpy() for output in attentions]
-            print(len(attentions),attentions[0].shape,attentions[-1].shape)
+            #print(len(attentions),attentions[0].shape,attentions[-1].shape)
 
 
 def load_dataset(tokenizer, evaluate=False, dataset_type = None):
@@ -372,7 +372,7 @@ def load_dataset(tokenizer, evaluate=False, dataset_type = None):
     else:
         cache_file = os.path.join(input_dir,"xlnet-base_train")
 
-    if os.path.exists(cache_file)# and False:
+    if os.path.exists(cache_file):# and False:
         print("Loading cache",cache_file)
         features_and_dataset = torch.load(cache_file)
         features, dataset, examples = (
