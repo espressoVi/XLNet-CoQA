@@ -23,6 +23,8 @@ class InputExample(object):
                  qas_id,
                  question_text,
                  paragraph_text,
+                 r_start = None,
+                 r_end = None,
                  orig_answer_text=None,
                  start_position=None,
                  answer_type=None,
@@ -31,6 +33,8 @@ class InputExample(object):
         self.qas_id = qas_id
         self.question_text = question_text
         self.paragraph_text = paragraph_text
+        self.r_start = r_start
+        self.r_end = r_end
         self.orig_answer_text = orig_answer_text
         self.start_position = start_position
         self.answer_type = answer_type
@@ -66,6 +70,8 @@ class InputFeatures(object):
                  segment_ids,
                  cls_index,
                  para_length,
+                 r_start=None,
+                 r_end=None,
                  start_position=None,
                  end_position=None,
                  is_unk=None,
@@ -85,6 +91,8 @@ class InputFeatures(object):
         self.segment_ids = segment_ids
         self.cls_index = cls_index
         self.para_length = para_length
+        self.r_start = r_start
+        self.r_end = r_end
         self.start_position = start_position
         self.end_position = end_position
         self.is_unk = is_unk
@@ -441,12 +449,13 @@ class CoqaPipeline(object):
 
             for i, (question, answer) in enumerate(qas):
                 qas_id = "{0}_{1}".format(data_id, i+1)
+                r_start, r_end = answer['span_start'],answer['span_end']
 
                 if dataset_type is not None:
                     if dataset_type == "TS":
-                        edge,inc = answer['span_end'],True
+                        edge,inc = r_end,True
                     elif dataset_type == "R" or dataset_type == "RG":
-                        edge,inc = answer['span_start'],False
+                        edge,inc = r_start,False
                     if edge != -1:
                         for m,(i,j) in enumerate(nlp_contexts['offsets']):
                             if i <= edge <= j:
@@ -480,6 +489,8 @@ class CoqaPipeline(object):
                     qas_id=qas_id,
                     question_text=question_text,
                     paragraph_text=paragraph_text,
+                    r_start = r_start,
+                    r_end = r_end,
                     orig_answer_text= orig_answer_text if dataset_type in [None,'TS'] else "unknown",
                     start_position=start_position if dataset_type in [None, 'TS'] else 0,
                     answer_type=answer_type if dataset_type in [None,'TS'] else "unknown",
@@ -713,7 +724,18 @@ class XLNetExampleProcessor(object):
             raw_end_pos = self._convert_tokenized_index(tokenized2raw_char_index, end_pos, N, is_start=False)
             token2char_raw_start_index.append(raw_start_pos)
             token2char_raw_end_index.append(raw_end_pos)
-        
+        #RATIONALE PART 
+        marks = list(zip(token2char_raw_start_index,token2char_raw_end_index))
+        raw_start,raw_end = example.r_start,example.r_end
+        if raw_end >= marks[-1][1]:
+            raw_end = marks[-1][1]
+        if raw_start != -1 and raw_end != -1:
+            r_start_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_start <= j[1]][0]
+            r_end_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_end <= j[1]][0]
+        else:
+            r_start_tokenised, r_end_tokenised = 0,0
+        assert r_start_tokenised <= r_end_tokenised
+
         if example.answer_type not in ["unknown", "yes", "no"] and not example.is_skipped and example.orig_answer_text:
             raw_start_char_pos = example.start_position
             raw_end_char_pos = raw_start_char_pos + len(example.orig_answer_text) - 1
@@ -815,6 +837,11 @@ class XLNetExampleProcessor(object):
             is_yes = (example.answer_type == "yes")
             is_no = (example.answer_type == "no")
             
+            doc_start = doc_span["start"]
+            doc_end = doc_start + doc_span["length"] - 1
+            if r_start_tokenised >= doc_start and r_end_tokenised <= doc_end:
+                r_start_tokenised = r_start_tokenised - doc_start
+                r_end_tokenised = r_end_tokenised - doc_start
             if example.answer_type == "number":
                 number_list = ["none", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
                 number = number_list.index(example.answer_subtype) + 1
@@ -840,7 +867,7 @@ class XLNetExampleProcessor(object):
             else:
                 start_position = cls_index
                 end_position = cls_index
-            
+
             feature = InputFeatures(
                 unique_id=self.unique_id,
                 qas_id=example.qas_id,
@@ -854,6 +881,8 @@ class XLNetExampleProcessor(object):
                 segment_ids=segment_ids,
                 cls_index=cls_index,
                 para_length=doc_para_length,
+                r_start = r_start_tokenised,
+                r_end = r_end_tokenised,
                 start_position=start_position,
                 end_position=end_position,
                 is_unk=is_unk,
@@ -883,8 +912,10 @@ class XLNetExampleProcessor(object):
         all_p_mask = torch.tensor([f.p_mask for f in features], dtype=torch.long)
          
         if not is_training:
+            all_r_start = torch.tensor([f.r_start for f in features], dtype=torch.long)
+            all_r_end = torch.tensor([f.r_end for f in features], dtype=torch.long)
             all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-            dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_cls_idx, all_p_mask, all_example_index)
+            dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_cls_idx, all_p_mask, all_example_index,all_r_start, all_r_end)
         else:
             all_start_positions = torch.tensor([f.start_position for f in features], dtype=torch.long)
             all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)

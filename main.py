@@ -11,6 +11,7 @@ from processors.metrics import get_predictions
 from transformers import XLNetModel, XLNetTokenizer, XLNetConfig
 from torch.nn import BCEWithLogitsLoss,CrossEntropyLoss
 from processors.coqa import CoqaPipeline, Tokenizer, XLNetExampleProcessor, XLNetPredictProcessor, OutputResult
+import numpy as np
 
 train_file="coqa-train-v1.0.json"
 predict_file="coqa-dev-v1.0.json"
@@ -343,8 +344,8 @@ def Write_attentions(model, tokenizer, device, dataset_type = None):
     #   wrtiting predictions once training is complete
     evalutation_sampler = SequentialSampler(dataset)
     evaluation_dataloader = DataLoader(dataset, sampler=evalutation_sampler, batch_size=evaluation_batch_size)
-    attn_results = []
-    for batch in tqdm(evaluation_dataloader, desc="Evaluating"):
+    attn_results = [[],[],[],[],[],[],[],[],[],[],[],[]]
+    for batch in tqdm(evaluation_dataloader, desc="Attentions"):
         model.eval()
         batch = tuple(t.to(device) for t in batch)
         with torch.no_grad():
@@ -359,9 +360,39 @@ def Write_attentions(model, tokenizer, device, dataset_type = None):
         for i, example_index in enumerate(index):
             eval_feature = features[index[i].item()]
             unique_id = int(eval_feature.unique_id)
+            r_start,r_end = eval_feature.r_start,eval_feature.r_end
+            length =len(np.where(np.array(eval_feature.input_mask) == 0)[0])
+            if (r_start,r_end) == (0,0) or r_start == r_end or r_end>=length:
+                continue
             attentions = result[-1]
             attentions = [output[i].detach().cpu().numpy() for output in attentions]
-            #print(len(attentions),attentions[0].shape,attentions[-1].shape)
+
+            for j in range(12):
+                attn_results[j].append(attention_res(attentions[j], -1,r_start,r_end+1, length))
+    attn_results = np.array(attn_results)
+    print('Mean: \n')
+    print(np.mean(attn_results,axis = 1))
+    print('STD: \n')
+    print(np.std(attn_results, axis = 1))
+
+def attention_res(attention,head,r_start,r_end,length):
+    assert head < len(attention)
+    if head == -1:
+        attention = np.mean(attention,axis = 0)
+    else:
+        attention = attention[head]
+    assert attention.shape == (max_seq_length,max_seq_length)
+    su,su_r,su_nr = [],[],[]
+    #print(r_start,r_end)
+    for i in range(length):
+        eta = np.sum(attention[i][r_start:r_end])
+        eta = (eta*length) / (r_end - r_start)
+        if r_start <= i <= r_end:
+            su_r.append(eta)
+        else:
+            su_nr.append(eta)
+        su.append(eta)
+    return np.mean(su), np.mean(su_r),np.mean(su_nr)
 
 
 def load_dataset(tokenizer, evaluate=False, dataset_type = None):
@@ -372,7 +403,7 @@ def load_dataset(tokenizer, evaluate=False, dataset_type = None):
     else:
         cache_file = os.path.join(input_dir,"xlnet-base_train")
 
-    if os.path.exists(cache_file):# and False:
+    if os.path.exists(cache_file) :#and False:
         print("Loading cache",cache_file)
         features_and_dataset = torch.load(cache_file)
         features, dataset, examples = (
@@ -428,7 +459,7 @@ def main(isTraining, attn = False):
             model.load_state_dict(torch.load(os.path.join(output_directory,'tweights.pt')))
             model.to(device)
             tokenizer = Tokenizer(output_directory)
-            Write_attentions(model, tokenizer, device, dataset_type = 'R')
+            Write_attentions(model, tokenizer, device, dataset_type = None)
         else:
             model = XLNetBaseModel(config)
             model.load_state_dict(torch.load(os.path.join(output_directory,'tweights.pt')))
