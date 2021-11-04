@@ -14,7 +14,7 @@ from processors.coqa import CoqaPipeline, Tokenizer, XLNetExampleProcessor, XLNe
 
 train_file="coqa-train-v1.0.json"
 predict_file="coqa-dev-v1.0.json"
-output_directory="XLNet_comb"
+output_directory="XLNet_base"
 pretrained_model="xlnet-base-cased"
 max_seq_length = 512
 epochs = 1.0
@@ -26,8 +26,6 @@ MAX_FLOAT = 1e30
 top_k = 5
  
 class XLNetBaseModel(XLNetModel):
-
-    #   Initialize Layers for our model
     def __init__(self,config, load_pre = False):
         super(XLNetBaseModel,self).__init__(config)
         self.xlnet = XLNetModel.from_pretrained(pretrained_model, config=config,) if load_pre else XLNetModel(config)
@@ -362,7 +360,7 @@ def load_dataset(tokenizer, evaluate=False, dataset_type = None):
     return dataset
 
 
-def main(isTraining):
+def main(isTraining = True):
     assert torch.cuda.is_available()
     device = torch.device('cuda')
     config = XLNetConfig.from_pretrained(pretrained_model)
@@ -388,8 +386,8 @@ def main(isTraining):
         model.to(device)
         model.eval()
         tokenizer = Tokenizer(output_directory)
-        Write_predictions(model, tokenizer, device, dataset_type = 'R')
+        Write_predictions(model, tokenizer, device, dataset_type = 'RG')
 
 if __name__ == "__main__":
-    #main(isTraining = True)
+    #main()
     main(isTraining = False)

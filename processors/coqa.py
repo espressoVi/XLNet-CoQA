@@ -459,15 +459,16 @@ class CoqaPipeline(object):
                         paragraph_text = str(parsed[:sent])
                         if len(paragraph_text) == 0:
                             continue
-                if dataset_type == "RG":
-                    paragraph_text = paragraph_text + ' ' + answer['input_text']
 
 
                 answer_type, answer_subtype = self._get_answer_type(question, answer)
                 answer_text, span_start, span_end, is_skipped = self._get_answer_span(answer, answer_type, paragraph_text)
                 question_text = self._get_question_text(question_history, question)
                 question_history = self._get_question_history(question_history, question, answer, answer_type, is_skipped, self.num_turn)
-                
+
+                if dataset_type == "RG" and answer_type == "span":
+                    if paragraph_text.find(answer['input_text']) == -1:
+                        paragraph_text = paragraph_text + ' ' + answer['input_text']
                                 
                 if answer_type not in ["unknown", "yes", "no"] and not is_skipped and answer_text:
                     start_position = span_start
