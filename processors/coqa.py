@@ -6,6 +6,7 @@ import json
 import numpy as np
 import torch
 import string
+from string import punctuation as punct
 import re
 from transformers import XLNetTokenizer, XLNetConfig
 from multiprocessing import Pool, cpu_count
@@ -65,6 +66,7 @@ class InputFeatures(object):
                  token2char_raw_end_index,
                  token2doc_index,
                  input_ids,
+                 input_tokens,
                  input_mask,
                  p_mask,
                  segment_ids,
@@ -86,6 +88,7 @@ class InputFeatures(object):
         self.token2char_raw_end_index = token2char_raw_end_index
         self.token2doc_index = token2doc_index
         self.input_ids = input_ids
+        self.input_tokens = input_tokens
         self.input_mask = input_mask
         self.p_mask = p_mask
         self.segment_ids = segment_ids
@@ -435,7 +438,6 @@ class CoqaPipeline(object):
         nlp = spacy.load('en_core_web_sm', parser=False) 
         examples = []
         for cnt,data in enumerate(data_list):
-            print(f'Done processing example [{cnt} of {len(data_list)}]',end = '\r')
             data_id = data["id"]
             paragraph_text = data["story"]
             
@@ -456,23 +458,40 @@ class CoqaPipeline(object):
                         edge,inc = r_end,True
                     elif dataset_type == "R" or dataset_type == "RG":
                         edge,inc = r_start,False
+                        r_start,r_end = -1,-1
                     if edge != -1:
                         for m,(i,j) in enumerate(nlp_contexts['offsets']):
                             if i <= edge <= j:
                                 edge = m+1 
                                 break
                         for (i,j) in nlp_contexts['sentences']:
-                            if i < edge <= j:
+                            if i <= edge < j:
                                 sent = j if inc else i
                                 break
                         paragraph_text = str(parsed[:sent])
+                        if r_start > len(paragraph_text):
+                            continue
                         if len(paragraph_text) == 0:
                             continue
-                if dataset_type == "RG":
-                    paragraph_text = paragraph_text + ' ' + answer['input_text']
-
 
                 answer_type, answer_subtype = self._get_answer_type(question, answer)
+
+                if dataset_type == "RG" and answer_type == 'span':
+                    gt = answer['input_text']
+                    f = paragraph_text.find(gt)
+                    if  f == -1:
+                        r_start = len(paragraph_text)
+                        paragraph_text = paragraph_text + ' ' + gt
+                        r_end = len(paragraph_text)-1
+                    else:
+                        st = (paragraph_text[f-1].isspace()) or (paragraph_text[f-1] in punct) if f!= 0 else True
+                        en = (paragraph_text[f+len(gt)] in punct) or (paragraph_text[f+len(gt)].isspace()) if (f+len(gt) < len(paragraph_text)) else True
+                        if st and en:
+                            r_start,r_end = f,f+len(gt)-1
+                        else:
+                            continue
+                if len(paragraph_text) == 0:
+                    continue
                 answer_text, span_start, span_end, is_skipped = self._get_answer_span(answer, answer_type, paragraph_text)
                 question_text = self._get_question_text(question_history, question)
                 question_history = self._get_question_history(question_history, question, answer, answer_type, is_skipped, self.num_turn)
@@ -498,7 +517,6 @@ class CoqaPipeline(object):
                     is_skipped=is_skipped)
 
                 examples.append(example)
-        print()
         
         return examples
 
@@ -729,9 +747,14 @@ class XLNetExampleProcessor(object):
         raw_start,raw_end = example.r_start,example.r_end
         if raw_end >= marks[-1][1]:
             raw_end = marks[-1][1]
+        if raw_start >= marks[-1][1]:
+            raw_start = -1
         if raw_start != -1 and raw_end != -1:
-            r_start_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_start <= j[1]][0]
-            r_end_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_end <= j[1]][0]
+            try:
+                r_start_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_start <= j[1]][0]
+                r_end_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_end <= j[1]][0]
+            except:
+                print(raw_start,raw_end,example.paragraph_text)
         else:
             r_start_tokenised, r_end_tokenised = 0,0
         assert r_start_tokenised <= r_end_tokenised
@@ -875,6 +898,7 @@ class XLNetExampleProcessor(object):
                 token2char_raw_start_index=doc_token2char_raw_start_index,
                 token2char_raw_end_index=doc_token2char_raw_end_index,
                 token2doc_index=doc_token2doc_index,
+                input_tokens = input_tokens,
                 input_ids=input_ids,
                 input_mask=input_mask,
                 p_mask=p_mask,
