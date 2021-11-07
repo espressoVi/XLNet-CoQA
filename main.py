@@ -14,7 +14,7 @@ from processors.coqa import CoqaPipeline, Tokenizer, XLNetExampleProcessor, XLNe
 
 train_file="coqa-train-v1.0.json"
 predict_file="coqa-dev-v1.0.json"
-output_directory="XLNet_base"
+output_directory="XLNet_combM"
 pretrained_model="xlnet-base-cased"
 max_seq_length = 512
 epochs = 1.0
