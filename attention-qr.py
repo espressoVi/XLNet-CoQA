@@ -15,7 +15,6 @@ import numpy as np
 
 train_file="coqa-train-v1.0.json"
 predict_file="coqa-dev-v1.0.json"
-output_directory="XLNet_comb"
 pretrained_model="xlnet-base-cased"
 max_seq_length = 512
 epochs = 1.0
@@ -249,14 +248,14 @@ def main(model_dir, dataset_type):
     assert torch.cuda.is_available()
     device = torch.device('cuda')
     config = XLNetConfig.from_pretrained(pretrained_model)
-    tokenizer = Tokenizer(output_directory)
+    tokenizer = Tokenizer(model_dir)
     model = XLNetBaseModel(config)
-    model.load_state_dict(torch.load(os.path.join(output_directory,'tweights.pt')))
+    model.load_state_dict(torch.load(os.path.join(model_dir,'tweights.pt')))
     model.to(device)
     for i in dataset_type:
         print(model_dir,i)
         Write_attentions(model, tokenizer, device, dataset_type = i)
 
 if __name__ == "__main__":
-    main(model_dir = 'XLNet_base',dataset_type = ['TS'])
+    main(model_dir = 'XLNet_base',dataset_type = ['RG',None,'TS'])
     main(model_dir = 'XLNet_combM',dataset_type = ['RG',None,'TS'])
