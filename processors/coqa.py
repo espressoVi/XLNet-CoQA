@@ -750,11 +750,8 @@ class XLNetExampleProcessor(object):
         if raw_start >= marks[-1][1]:
             raw_start = -1
         if raw_start != -1 and raw_end != -1:
-            try:
-                r_start_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_start <= j[1]][0]
-                r_end_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_end <= j[1]][0]
-            except:
-                print(raw_start,raw_end,example.paragraph_text)
+            r_start_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_start <= j[1]][0]
+            r_end_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_end <= j[1]][0]
         else:
             r_start_tokenised, r_end_tokenised = 0,0
         assert r_start_tokenised <= r_end_tokenised
@@ -837,7 +834,6 @@ class XLNetExampleProcessor(object):
             input_tokens.append("<cls>")
             segment_ids.append(self.segment_vocab_map["<cls>"])
             p_mask.append(0)
-            
             input_ids = self.tokenizer.tokens_to_ids(input_tokens)
 
             # The mask has 0 for real tokens and 1 for padding tokens. Only real tokens are attended to.
