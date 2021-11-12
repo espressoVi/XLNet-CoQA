@@ -314,10 +314,7 @@ class CoqaPipeline(object):
         
         return -1, -1
     
-    def _get_answer_span(self,
-                         answer,
-                         answer_type,
-                         paragraph_text):
+    def _get_answer_span(self, answer, answer_type, paragraph_text):
         input_text = answer["input_text"].strip().lower()
         span_start, span_end = answer["span_start"], answer["span_end"]
         if span_start == -1 or span_end == -1:
@@ -364,23 +361,16 @@ class CoqaPipeline(object):
         
         return norm_answer
     
-    def _get_answer_type(self,
-                         question,
-                         answer):
+    def _get_answer_type(self, question, answer):
         norm_answer = self._normalize_answer(answer["input_text"])
-        
         if norm_answer == "unknown" or "bad_turn" in answer:
             return "unknown", None
-        
         if norm_answer == "yes":
             return "yes", None
-        
         if norm_answer == "no":
             return "no", None
-        
         if norm_answer in ["none", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]:
             return "number", norm_answer
-        
         norm_question_tokens = self.normalize_answer(question["input_text"]).split(" ")
         if "or" in norm_question_tokens:
             index = norm_question_tokens.index("or")
@@ -426,8 +416,7 @@ class CoqaPipeline(object):
     def _get_example(self, data_list,dataset_type = None):
         nlp = spacy.load('en_core_web_sm', parser=False) 
         examples = []
-        for cnt,data in enumerate(data_list):
-            print(f'Done processing example [{cnt} of {len(data_list)}]',end = '\r')
+        for cnt,data in tqdm(enumerate(data_list),total = len(data_list),desc = "Preprocessing "):
             data_id = data["id"]
             paragraph_text = data["story"]
             
@@ -445,7 +434,7 @@ class CoqaPipeline(object):
                 if dataset_type is not None:
                     if dataset_type == "TS":
                         edge,inc = answer['span_end'],True
-                    elif dataset_type == "R" or dataset_type == "RG":
+                    elif dataset_type == "RG":
                         edge,inc = answer['span_start'],False
                     if edge != -1:
                         for m,(i,j) in enumerate(nlp_contexts['offsets']):
@@ -459,17 +448,16 @@ class CoqaPipeline(object):
                         paragraph_text = str(parsed[:sent])
                         if len(paragraph_text) == 0:
                             continue
-
-
                 answer_type, answer_subtype = self._get_answer_type(question, answer)
-                answer_text, span_start, span_end, is_skipped = self._get_answer_span(answer, answer_type, paragraph_text)
-                question_text = self._get_question_text(question_history, question)
-                question_history = self._get_question_history(question_history, question, answer, answer_type, is_skipped, self.num_turn)
 
                 if dataset_type == "RG" and answer_type == "span":
                     if paragraph_text.find(answer['input_text']) == -1:
                         paragraph_text = paragraph_text + ' ' + answer['input_text']
-                                
+
+                answer_text, span_start, span_end, is_skipped = self._get_answer_span(answer, answer_type, paragraph_text)
+                question_text = self._get_question_text(question_history, question)
+                question_history = self._get_question_history(question_history, question, answer, answer_type, is_skipped, self.num_turn)
+
                 if answer_type not in ["unknown", "yes", "no"] and not is_skipped and answer_text:
                     start_position = span_start
                     orig_answer_text = self._process_found_answer(answer["input_text"], answer_text)
@@ -483,13 +471,11 @@ class CoqaPipeline(object):
                     paragraph_text=paragraph_text,
                     orig_answer_text= orig_answer_text if dataset_type in [None,'TS'] else "unknown",
                     start_position=start_position if dataset_type in [None, 'TS'] else 0,
-                    answer_type=answer_type if dataset_type in [None,'TS'] else "unknown",
+                    answer_type=answer_type if dataset_type in [None,'TS','RG'] else "unknown",
                     answer_subtype=answer_subtype if dataset_type in [None,'TS'] else None,
                     is_skipped=is_skipped)
 
                 examples.append(example)
-        print()
-        
         return examples
 
 class Tokenizer(object):

@@ -11,10 +11,11 @@ from processors.metrics import get_predictions
 from transformers import XLNetModel, XLNetTokenizer, XLNetConfig
 from torch.nn import BCEWithLogitsLoss,CrossEntropyLoss
 from processors.coqa import CoqaPipeline, Tokenizer, XLNetExampleProcessor, XLNetPredictProcessor, OutputResult
+import numpy as np
 
 train_file="coqa-train-v1.0.json"
 predict_file="coqa-dev-v1.0.json"
-output_directory="XLNet_combM"
+output_directory="XLNet_orig"
 pretrained_model="xlnet-base-cased"
 max_seq_length = 512
 epochs = 1.0
@@ -29,25 +30,19 @@ class XLNetBaseModel(XLNetModel):
     def __init__(self,config, load_pre = False):
         super(XLNetBaseModel,self).__init__(config)
         self.xlnet = XLNetModel.from_pretrained(pretrained_model, config=config,) if load_pre else XLNetModel(config)
-
         hidden_size = config.hidden_size
         self.seq_len = max_seq_length
-
         self.start_project = nn.Linear(hidden_size,1)
-
         self.end_modelling = nn.Linear(2*hidden_size,hidden_size)
         self.end_norm = nn.LayerNorm(hidden_size)
         self.end_project = nn.Linear(hidden_size,1)
-
         self.answer_modelling = nn.Linear(2*hidden_size,hidden_size)
         self.answer_drop = nn.Dropout(p=0.1)
-
         self.unk_project = nn.Linear(hidden_size,1)
         self.yes_project = nn.Linear(hidden_size,1)
         self.no_project = nn.Linear(hidden_size,1)
         self.num_project = nn.Linear(hidden_size,12)
         self.opt_project = nn.Linear(hidden_size,3)
-
         self.relu = nn.ReLU
 
     def generate_masked_data(self, input_data, input_mask):
@@ -174,8 +169,6 @@ class XLNetBaseModel(XLNetModel):
         opt_probs = torch.softmax(opt_result, dim=-1)
         predicts["opt_probs"] = opt_probs
     
-
-    
         #****************************************LOSSES********************************
         bce = BCEWithLogitsLoss(reduction = "none")
         loss = 0.0
@@ -220,25 +213,18 @@ def convert_to_list(tensor):
     return tensor.detach().cpu().tolist()
 
 def train(train_dataset, model, tokenizer, device):
-
     train_sampler = RandomSampler(train_dataset) 
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=train_batch_size)
     t_total = len(train_dataloader) // 1 * epochs
-
-    # Preparing optimizer and scheduler
-    
     optimizer_parameters = [{"params": [p for n, p in model.named_parameters() if not any(nd in n for nd in ["bias", "LayerNorm.weight"])],"weight_decay": 0.01,},
                             {"params": [p for n, p in model.named_parameters() if any(nd in n for nd in ["bias", "LayerNorm.weight"])], "weight_decay": 0.0}]
     optimizer = AdamW(optimizer_parameters,lr=3e-5, eps=1e-8)
     scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=3000, num_training_steps=t_total)
-
-    # Check if saved optimizer or scheduler states exist
     if os.path.isfile(os.path.join(pretrained_model, "optimizer.pt")) and os.path.isfile(os.path.join(pretrained_model, "scheduler.pt")):
         optimizer.load_state_dict(torch.load(
             os.path.join(pretrained_model, "optimizer.pt")))
         scheduler.load_state_dict(torch.load(
             os.path.join(pretrained_model, "scheduler.pt")))
-
     counter = 1
     epochs_trained = 0
     train_loss, loss = 0.0, 0.0
@@ -264,7 +250,6 @@ def train(train_dataset, model, tokenizer, device):
             loss = model(**inputs)
             loss.backward()
             train_loss += loss.item()
-             #   optimizing training parameters
             optimizer.step()
             scheduler.step()  
             model.zero_grad()
@@ -272,7 +257,6 @@ def train(train_dataset, model, tokenizer, device):
             epoch_iterator.set_description("Loss :%f" % (train_loss/(4*counter)))
             epoch_iterator.refresh()
 
-            #   Saving model weights every 1000 iterations
             if counter % 1000 == 0:
                 output_dir = os.path.join(output_directory, "model_weights")
                 if not os.path.exists(output_dir):
@@ -287,11 +271,8 @@ def train(train_dataset, model, tokenizer, device):
 
 def Write_predictions(model, tokenizer, device, dataset_type = None):
     dataset, examples, features = load_dataset(tokenizer, evaluate=True,dataset_type = dataset_type)
-
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
-        
-    #   wrtiting predictions once training is complete
     evalutation_sampler = SequentialSampler(dataset)
     evaluation_dataloader = DataLoader(dataset, sampler=evalutation_sampler, batch_size=evaluation_batch_size)
     predict_results = []
@@ -322,72 +303,54 @@ def Write_predictions(model, tokenizer, device, dataset_type = None):
     predict_processor = XLNetPredictProcessor(output_dir = output_directory, tokenizer=tokenizer, predict_tag = "normal")
     predict_processor.process(examples, features, predict_results)
 
-
 def load_dataset(tokenizer, evaluate=False, dataset_type = None):
-    #   converting raw coqa dataset into features to be processed by ROBERTA   
-    input_dir = "data" if "data" else "."
-    if evaluate:
-        cache_file = os.path.join(input_dir,"xlnet-base_dev")
-    else:
-        cache_file = os.path.join(input_dir,"xlnet-base_train")
-
+    input_dir = "data"
+    cache_file = os.path.join(input_dir,"xlnet-base_dev") if evaluate else os.path.join(input_dir,"xlnet-base_train")
     if os.path.exists(cache_file) and False:
-        print("Loading cache",cache_file)
+        print("Loading cached",cache_file)
         features_and_dataset = torch.load(cache_file)
-        features, dataset, examples = (
-            features_and_dataset["features"],features_and_dataset["dataset"],features_and_dataset["examples"])
+        features, dataset, examples = (features_and_dataset["features"],features_and_dataset["dataset"],features_and_dataset["examples"])
     else:
         print("Creating features from dataset file at", input_dir)
-
-        if not "data" and ((evaluate and not predict_file) or (not evaluate and not train_file)):
-            raise ValueError("predict_file or train_file not found")
+        if ((evaluate and not predict_file) or (not evaluate and not train_file)):
+            raise ValueError("predict_file or train_file name not found")
         else:
+            examples = []
             processor = CoqaPipeline()
-            if evaluate:
-                examples = processor.get_dev_examples(dataset_type = dataset_type)
-            else:
-                examples = processor.get_train_examples(dataset_type = "TS")
-                examples.extend(processor.get_train_examples())
-                examples.extend(processor.get_train_examples(dataset_type = 'RG'))
-
+            proc = processor.get_dev_examples if evaluate else processor.get_train_examples
+            assert not evaluate or (len(dataset_type) == 1)
+            for datas in dataset_type:
+                examples.extend(proc(dataset_type = datas))
         feat_extract = XLNetExampleProcessor(tokenizer)
         features, dataset = feat_extract.convert_examples_to_features(examples, not evaluate)
-
-
         torch.save({"features": features, "dataset": dataset, "examples": examples}, cache_file)
     if evaluate:
         return dataset, examples, features
     return dataset
 
-
-def main(isTraining = True):
+def main(isTraining,dataset_type):
     assert torch.cuda.is_available()
     device = torch.device('cuda')
     config = XLNetConfig.from_pretrained(pretrained_model)
-
     if isTraining:
         tokenizer = Tokenizer(pretrained_model)
         model = XLNetBaseModel(config, load_pre = True)
         model.to(device)
-
         if os.path.exists(output_directory) and os.listdir(output_directory):
             raise ValueError(f"Output directory {output_directory}  already exists, Change output_directory name")
         else:
             os.makedirs(output_directory)
         
-        train_dataset = load_dataset(tokenizer, evaluate=False)
+        train_dataset = load_dataset(tokenizer, evaluate=False, dataset_type = dataset_type)
         train_loss = train(train_dataset, model, tokenizer, device)
         tokenizer.save_pretrained(output_directory)
         torch.save(model.state_dict(), os.path.join(output_directory,'tweights.pt'))
-
     else:
         model = XLNetBaseModel(config)
         model.load_state_dict(torch.load(os.path.join(output_directory,'tweights.pt')))
         model.to(device)
-        model.eval()
         tokenizer = Tokenizer(output_directory)
-        Write_predictions(model, tokenizer, device, dataset_type = 'RG')
+        Write_predictions(model, tokenizer, device, dataset_type = dataset_type)
 
 if __name__ == "__main__":
-    #main()
-    main(isTraining = False)
+    main(isTraining = False, dataset_type = ['RG'])
