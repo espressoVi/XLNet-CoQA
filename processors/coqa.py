@@ -456,7 +456,7 @@ class CoqaPipeline(object):
                 if dataset_type is not None:
                     if dataset_type == "TS":
                         edge,inc = r_end,True
-                    elif dataset_type == "R" or dataset_type == "RG":
+                    elif dataset_type == "RG":
                         edge,inc = r_start,False
                         r_start,r_end = -1,-1
                     if edge != -1:
@@ -471,8 +471,8 @@ class CoqaPipeline(object):
                         paragraph_text = str(parsed[:sent])
                         if r_start > len(paragraph_text):
                             continue
-                        if len(paragraph_text) == 0:
-                            continue
+                    if len(paragraph_text) == 0:
+                        continue
 
                 answer_type, answer_subtype = self._get_answer_type(question, answer)
 
