@@ -1,5 +1,3 @@
-import collections
-import glob
 import os
 import torch
 import torch.nn as nn
@@ -12,10 +10,8 @@ from transformers import XLNetModel, XLNetTokenizer, XLNetConfig
 from torch.nn import BCEWithLogitsLoss,CrossEntropyLoss
 from processors.coqa import CoqaPipeline, Tokenizer, XLNetExampleProcessor, XLNetPredictProcessor, OutputResult
 import numpy as np
+import getopt,sys
 
-train_file="coqa-train-v1.0.json"
-predict_file="coqa-dev-v1.0.json"
-output_directory="XLNet_orig"
 pretrained_model="xlnet-base-cased"
 max_seq_length = 512
 epochs = 1.0
@@ -212,7 +208,7 @@ class XLNetBaseModel(XLNetModel):
 def convert_to_list(tensor):
     return tensor.detach().cpu().tolist()
 
-def train(train_dataset, model, tokenizer, device):
+def train(train_dataset, model, tokenizer, device,output_directory):
     train_sampler = RandomSampler(train_dataset) 
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=train_batch_size)
     t_total = len(train_dataloader) // 1 * epochs
@@ -269,7 +265,7 @@ def train(train_dataset, model, tokenizer, device):
     return train_loss/counter
 
 
-def Write_predictions(model, tokenizer, device, dataset_type = None):
+def Write_predictions(model, tokenizer, device, dataset_type = None,output_directory = None):
     dataset, examples, features = load_dataset(tokenizer, evaluate=True,dataset_type = dataset_type)
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
@@ -305,30 +301,19 @@ def Write_predictions(model, tokenizer, device, dataset_type = None):
 
 def load_dataset(tokenizer, evaluate=False, dataset_type = None):
     input_dir = "data"
-    cache_file = os.path.join(input_dir,"xlnet-base_dev") if evaluate else os.path.join(input_dir,"xlnet-base_train")
-    if os.path.exists(cache_file) and False:
-        print("Loading cached",cache_file)
-        features_and_dataset = torch.load(cache_file)
-        features, dataset, examples = (features_and_dataset["features"],features_and_dataset["dataset"],features_and_dataset["examples"])
-    else:
-        print("Creating features from dataset file at", input_dir)
-        if ((evaluate and not predict_file) or (not evaluate and not train_file)):
-            raise ValueError("predict_file or train_file name not found")
-        else:
-            examples = []
-            processor = CoqaPipeline()
-            proc = processor.get_dev_examples if evaluate else processor.get_train_examples
-            assert not evaluate or (len(dataset_type) == 1)
-            for datas in dataset_type:
-                examples.extend(proc(dataset_type = datas))
-        feat_extract = XLNetExampleProcessor(tokenizer)
-        features, dataset = feat_extract.convert_examples_to_features(examples, not evaluate)
-        torch.save({"features": features, "dataset": dataset, "examples": examples}, cache_file)
+    examples = []
+    processor = CoqaPipeline()
+    proc = processor.get_dev_examples if evaluate else processor.get_train_examples
+    assert not evaluate or (len(dataset_type) == 1)
+    for datas in dataset_type:
+        examples.extend(proc(dataset_type = datas))
+    feat_extract = XLNetExampleProcessor(tokenizer)
+    features, dataset = feat_extract.convert_examples_to_features(examples, not evaluate)
     if evaluate:
         return dataset, examples, features
     return dataset
 
-def main(isTraining,dataset_type):
+def manager(isTraining,dataset_type, output_directory):
     assert torch.cuda.is_available()
     device = torch.device('cuda')
     config = XLNetConfig.from_pretrained(pretrained_model)
@@ -342,7 +327,7 @@ def main(isTraining,dataset_type):
             os.makedirs(output_directory)
         
         train_dataset = load_dataset(tokenizer, evaluate=False, dataset_type = dataset_type)
-        train_loss = train(train_dataset, model, tokenizer, device)
+        train_loss = train(train_dataset, model, tokenizer, device,output_directory)
         tokenizer.save_pretrained(output_directory)
         torch.save(model.state_dict(), os.path.join(output_directory,'tweights.pt'))
     else:
@@ -350,7 +335,53 @@ def main(isTraining,dataset_type):
         model.load_state_dict(torch.load(os.path.join(output_directory,'tweights.pt')))
         model.to(device)
         tokenizer = Tokenizer(output_directory)
-        Write_predictions(model, tokenizer, device, dataset_type = dataset_type)
+        Write_predictions(model, tokenizer, device, dataset_type = dataset_type, output_directory = output_directory)
 
+def main():
+    isTraining,isEval = False, False
+    train_dataset_type, eval_dataset_type = [],[]
+    output_directory = "XLNet"
+    argumentList = sys.argv[1:]
+    options = "ht:e:o:"
+    long_options = ["help", "train=","eval=", "output="]
+    try:
+        arguments, values = getopt.getopt(argumentList, options, long_options)
+        for currentArgument, currentValue in arguments:
+            if currentArgument in ("-h", "--Help"):
+                print ("""python main.py --train [O|C] --eval [O|TS|RG] --output [directory name]\n
+                        --train O for original training C for combined training \n
+                        --eval for eval on (O) original (TS) truncated and (RG) for TS-R dataset as defined in paper\n
+                        --output [dir_name] is the output directory to write weights and predictions in, 
+                        and in case of eval to load weights from.
+                        e.g. python main.py --train C --eval RG --output XLNet_comb
+                        for combined training followed by eval on RG and writing to ./XLNet_comb""")
+                return
+     
+            elif currentArgument in ("-t", "--train"):
+                isTraining = True
+                opts = {'O':[None],'C':[None, 'TS','RG']}
+                if currentValue in opts:
+                    train_dataset_type = opts[currentValue]
+                else:
+                    print('See "python main.py --help" for usage')
+                    return
+            elif currentArgument in ("-e", "--eval"):
+                opts = {'O':[None],'TS':['TS'], 'RG':['RG']}
+                if currentValue in opts:
+                    eval_dataset_type = opts[currentValue]
+                    isEval = True
+                else:
+                    print('See "python main.py --help" for usage')
+                    return
+            elif currentArgument in ("-o", "--output"):
+                output_directory = currentValue
+
+    except getopt.error as err:
+        print (str(err))
+
+    if isTraining:
+        manager(isTraining = True, dataset_type = train_dataset_type, output_directory = output_directory)
+    if isEval:
+        manager(isTraining = False, dataset_type = eval_dataset_type, output_directory = output_directory)
 if __name__ == "__main__":
-    main(isTraining = False, dataset_type = ['RG'])
+    main()

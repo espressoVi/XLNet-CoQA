@@ -159,10 +159,10 @@ class CoqaPipeline(object):
         example_list = [example for example in example_list if not example.is_skipped]
         return example_list
     
-    def get_dev_examples(self, dataset_type = None, attention = False):
+    def get_dev_examples(self, dataset_type = None):
         data_path = os.path.join(self.data_dir, test_file)
         data_list = self._read_json(data_path)
-        example_list = self._get_example(data_list,dataset_type = dataset_type, attention = attention)
+        example_list = self._get_example(data_list,dataset_type = dataset_type)
         return example_list
     
     def _read_json(self, data_path):
@@ -374,14 +374,19 @@ class CoqaPipeline(object):
     
     def _get_answer_type(self, question, answer):
         norm_answer = self._normalize_answer(answer["input_text"])
+        
         if norm_answer == "unknown" or "bad_turn" in answer:
             return "unknown", None
+        
         if norm_answer == "yes":
             return "yes", None
+        
         if norm_answer == "no":
             return "no", None
+        
         if norm_answer in ["none", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]:
             return "number", norm_answer
+        
         norm_question_tokens = self.normalize_answer(question["input_text"]).split(" ")
         if "or" in norm_question_tokens:
             index = norm_question_tokens.index("or")
@@ -424,7 +429,7 @@ class CoqaPipeline(object):
 
         assert word_idx == len(output['word'])
         return output
-    def _get_example(self, data_list,dataset_type = None,attention = False):
+    def _get_example(self, data_list,dataset_type = None):
         nlp = spacy.load('en_core_web_sm', parser=False) 
         examples = []
         for cnt,data in tqdm(enumerate(data_list),total = len(data_list),desc = "Preprocessing "):
@@ -463,17 +468,16 @@ class CoqaPipeline(object):
                             continue
                     if len(paragraph_text) == 0:
                         continue
+
                 answer_type, answer_subtype = self._get_answer_type(question, answer)
 
-                if dataset_type == "RG" and answer_type == "span":
+                if dataset_type == "RG" and answer_type == 'span':
                     gt = answer['input_text']
                     f = paragraph_text.find(gt)
                     if  f == -1:
                         r_start = len(paragraph_text)
                         paragraph_text = paragraph_text + ' ' + gt
                         r_end = len(paragraph_text)-1
-                    elif  f != -1 and not attention:
-                        paragraph_text = paragraph_text
                     else:
                         st = (paragraph_text[f-1].isspace()) or (paragraph_text[f-1] in punct) if f!= 0 else True
                         en = (paragraph_text[f+len(gt)] in punct) or (paragraph_text[f+len(gt)].isspace()) if (f+len(gt) < len(paragraph_text)) else True
@@ -486,7 +490,8 @@ class CoqaPipeline(object):
                 answer_text, span_start, span_end, is_skipped = self._get_answer_span(answer, answer_type, paragraph_text)
                 question_text = self._get_question_text(question_history, question)
                 question_history = self._get_question_history(question_history, question, answer, answer_type, is_skipped, self.num_turn)
-
+                
+                                
                 if answer_type not in ["unknown", "yes", "no"] and not is_skipped and answer_text:
                     start_position = span_start
                     orig_answer_text = self._process_found_answer(answer["input_text"], answer_text)
@@ -498,8 +503,8 @@ class CoqaPipeline(object):
                     qas_id=qas_id,
                     question_text=question_text,
                     paragraph_text=paragraph_text,
-                    r_start = r_start if attention else None,
-                    r_end = r_end if attention else None,
+                    r_start = r_start,
+                    r_end = r_end,
                     orig_answer_text= orig_answer_text if dataset_type in [None,'TS'] else "unknown",
                     start_position=start_position if dataset_type in [None, 'TS'] else 0,
                     answer_type=answer_type if dataset_type in [None,'TS'] else "unknown",
@@ -507,6 +512,7 @@ class CoqaPipeline(object):
                     is_skipped=is_skipped)
 
                 examples.append(example)
+        
         return examples
 
 class Tokenizer(object):
@@ -731,21 +737,19 @@ class XLNetExampleProcessor(object):
             raw_end_pos = self._convert_tokenized_index(tokenized2raw_char_index, end_pos, N, is_start=False)
             token2char_raw_start_index.append(raw_start_pos)
             token2char_raw_end_index.append(raw_end_pos)
+        #RATIONALE PART 
         marks = list(zip(token2char_raw_start_index,token2char_raw_end_index))
         raw_start,raw_end = example.r_start,example.r_end
-        if raw_start != None and raw_end !=None:
-            if raw_end >= marks[-1][1]:
-                raw_end = marks[-1][1]
-            if raw_start >= marks[-1][1]:
-                raw_start = -1
-            if raw_start != -1 and raw_end != -1:
-                r_start_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_start <= j[1]][0]
-                r_end_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_end <= j[1]][0]
-            else:
-                r_start_tokenised, r_end_tokenised = 0,0
-            assert r_start_tokenised <= r_end_tokenised
+        if raw_end >= marks[-1][1]:
+            raw_end = marks[-1][1]
+        if raw_start >= marks[-1][1]:
+            raw_start = -1
+        if raw_start != -1 and raw_end != -1:
+            r_start_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_start <= j[1]][0]
+            r_end_tokenised = [i for i,j in enumerate(marks) if j[0] <= raw_end <= j[1]][0]
         else:
-            r_start_tokenised, r_end_tokenised = None,None
+            r_start_tokenised, r_end_tokenised = 0,0
+        assert r_start_tokenised <= r_end_tokenised
 
         if example.answer_type not in ["unknown", "yes", "no"] and not example.is_skipped and example.orig_answer_text:
             raw_start_char_pos = example.start_position
@@ -825,7 +829,6 @@ class XLNetExampleProcessor(object):
             input_tokens.append("<cls>")
             segment_ids.append(self.segment_vocab_map["<cls>"])
             p_mask.append(0)
-            
             input_ids = self.tokenizer.tokens_to_ids(input_tokens)
 
             # The mask has 0 for real tokens and 1 for padding tokens. Only real tokens are attended to.
@@ -847,12 +850,12 @@ class XLNetExampleProcessor(object):
             is_unk = (example.answer_type == "unknown" or example.is_skipped)
             is_yes = (example.answer_type == "yes")
             is_no = (example.answer_type == "no")
+            
             doc_start = doc_span["start"]
             doc_end = doc_start + doc_span["length"] - 1
-            if r_start_tokenised != None and r_end_tokenised !=None:
-                if r_start_tokenised >= doc_start and r_end_tokenised <= doc_end:
-                    r_start_tokenised = r_start_tokenised - doc_start
-                    r_end_tokenised = r_end_tokenised - doc_start
+            if r_start_tokenised >= doc_start and r_end_tokenised <= doc_end:
+                r_start_tokenised = r_start_tokenised - doc_start
+                r_end_tokenised = r_end_tokenised - doc_start
             if example.answer_type == "number":
                 number_list = ["none", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
                 number = number_list.index(example.answer_subtype) + 1
@@ -878,7 +881,7 @@ class XLNetExampleProcessor(object):
             else:
                 start_position = cls_index
                 end_position = cls_index
-            
+
             feature = InputFeatures(
                 unique_id=self.unique_id,
                 qas_id=example.qas_id,
@@ -924,14 +927,10 @@ class XLNetExampleProcessor(object):
         all_p_mask = torch.tensor([f.p_mask for f in features], dtype=torch.long)
          
         if not is_training:
+            all_r_start = torch.tensor([f.r_start for f in features], dtype=torch.long)
+            all_r_end = torch.tensor([f.r_end for f in features], dtype=torch.long)
             all_example_index = torch.arange(all_input_ids.size(0), dtype=torch.long)
-            excR = all([f.r_start == None for f in features])
-            if not excR:
-                all_r_start = torch.tensor([f.r_start for f in features], dtype=torch.long)
-                all_r_end = torch.tensor([f.r_end for f in features], dtype=torch.long)
-                dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_cls_idx, all_p_mask, all_example_index,all_r_start, all_r_end)
-            else:
-                dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_cls_idx, all_p_mask, all_example_index)
+            dataset = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_cls_idx, all_p_mask, all_example_index,all_r_start, all_r_end)
         else:
             all_start_positions = torch.tensor([f.start_position for f in features], dtype=torch.long)
             all_end_positions = torch.tensor([f.end_position for f in features], dtype=torch.long)
