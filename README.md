@@ -18,8 +18,10 @@ conda activate RobustProject
 ```
 #### Download
 The coqa dataset is to be downloaded and place in ./data, files can be downloaded from 
+
 https://nlp.stanford.edu/data/coqa/coqa-train-v1.0.json  and
 https://nlp.stanford.edu/data/coqa/coqa-dev-v1.0.json
+
 You should have the files 
 ```
 ./data/coqa-dev-v1.0.json
@@ -61,15 +63,3 @@ To get blockwise rationale statistics of the model stored at directory. Output i
 ```python attention-qr.py --output [directory] ```
 
 To get eta and p_sep statistics of the model stored at directory. Output is stored in [directory]
-
-#### Repeat step 6,7 for the original and combined training model.
-
-Implementation of Intervention based training for conversational question answering (CoQA dataset) on XLNet.
-
-Features:
-1) Train on the original dataset
-2) Train on the combined O, TS, TS-R dataset
-3) Evaluation on O,TS, TS-R
-4) Attention metrics eta, p_sep
-
-#### Repeat step 6 for the original and combined training model.
